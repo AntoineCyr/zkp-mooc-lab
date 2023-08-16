@@ -23,6 +23,7 @@ template OR() {
     signal input a;
     signal input b;
     signal output out;
+
     out <== a + b - a*b;
 }
 
@@ -98,6 +99,7 @@ template IsZero() {
     signal output out;
 
     signal inv;
+
     inv <-- in!=0 ? 1/in : 0;
 
     out <== -in*inv +1;
