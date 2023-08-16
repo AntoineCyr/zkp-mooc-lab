@@ -23,7 +23,6 @@ template OR() {
     signal input a;
     signal input b;
     signal output out;
-
     out <== a + b - a*b;
 }
 
@@ -99,7 +98,6 @@ template IsZero() {
     signal output out;
 
     signal inv;
-
     inv <-- in!=0 ? 1/in : 0;
 
     out <== -in*inv +1;
@@ -148,7 +146,15 @@ template CheckBitLength(b) {
     signal input in;
     signal output out;
 
-    // TODO
+    var lc = 2**(b);
+    component less_than = LessThan(b);
+    log("checkBitLength");
+    log(lc);
+    log(in);
+    less_than.in <== [in,lc];
+    out <== less_than.out;
+    log(out);
+
 }
 
 /*
@@ -178,6 +184,7 @@ template CheckWellFormedness(k, p) {
     component check_m_bits = CheckBitLength(p);
     check_m_bits.in <== m - (1 << p);
 
+
     // choose the right checks based on `is_e_zero`
     component if_else = IfThenElse();
     if_else.cond <== is_e_zero.out;
@@ -197,7 +204,17 @@ template RightShift(b, shift) {
     signal input x;
     signal output y;
 
-    // TODO
+    component num_bit = Num2Bits(b);
+    num_bit.in <== x;
+
+    var arr[b];
+    for(var i = 0; i < b - shift; i++){
+        arr[i] = num_bit.bits[shift + i];
+    }
+
+    component bit_num = Bits2Num(b);
+    bit_num.bits <== arr;
+    y <== bit_num.out;
 }
 
 /*
@@ -258,8 +275,35 @@ template LeftShift(shift_bound) {
     signal input shift;
     signal input skip_checks;
     signal output y;
+    assert(0<= shift);
+    if (skip_checks != 1) {
+        assert(shift< shift_bound);
+    }
+    //find a  way to get number of bits
+    //do loop until x = 0
+    //1 more assertion (sum of bits === x * shift**2)
+    var b = 252;
+    signal bits[b];
+    var bit_value = 0;
+    var loop = 1;
+    var i = 0;
 
-    // TODO
+
+    for (var i = 0; i < b; i++) {
+        if (i<shift){
+            bit_value = 0;
+        }
+        else  {
+            bit_value = (x >> i-shift) & 1;
+        }
+        bits[i] <-- bit_value;
+        bits[i] * (1 - bits[i]) === 0;
+        
+    } 
+    
+    component bit_num = Bits2Num(b);
+    bit_num.bits <== bits;
+    y <== bit_num.out;
 }
 
 /*
@@ -270,11 +314,36 @@ template LeftShift(shift_bound) {
  * If `skip_checks` = 1, then we don't care about the output and the non-zero constraint is not enforced.
  */
 template MSNZB(b) {
+    //1 more assertion (sum of bits === x * shift**2)
     signal input in;
     signal input skip_checks;
     signal output one_hot[b];
+    signal bits[b];
+    if (skip_checks != 1) {
+        assert(in != 0);
+    }
+    var bit_value = 0;
 
-    // TODO
+    component num_bits = Num2Bits(b);
+    num_bits.in <== in;
+    bits <==  num_bits.bits;
+    var msnzb = 0;
+    for (var j = 0; j<b ; j++){
+        if (bits[j] == 1){
+            msnzb = j;
+        }
+    }
+    for (var i = 0; i < b; i++) {
+        if (i == msnzb){
+            bit_value = 1;
+        }
+        else  {
+            bit_value = 0;
+        }
+        one_hot[i] <-- bit_value;
+        one_hot[i] * (1 - one_hot[i]) === 0;
+    }
+   
 }
 
 /*
@@ -284,15 +353,51 @@ template MSNZB(b) {
  * Enforces that `m` is non-zero as a zero-value can not be normalized.
  * If `skip_checks` = 1, then we don't care about the output and the non-zero constraint is not enforced.
  */
+
 template Normalize(k, p, P) {
+    //e_out constraint
     signal input e;
     signal input m;
     signal input skip_checks;
     signal output e_out;
     signal output m_out;
-    assert(P > p);
+    var ell[P+1];
+    var bit_value = 0;
 
-    // TODO
+    if (skip_checks != 1) {
+        assert(m != 0);
+    }
+
+    assert(P > p);
+    component msnzp = MSNZB(P+1);
+    msnzp.in <== m;
+    msnzp.skip_checks <== skip_checks;
+    ell = msnzp.one_hot;
+
+    signal bits[P+1];
+    var j = 0;
+    var shift = -1;
+    while (shift == -1) {
+        shift = ell[j]*j - 1;
+        j = j+1;
+    }
+    shift = shift + 1;
+    for (var i = 0; i < P+1; i++) {
+        if (i < P-shift){
+            bit_value = 0;
+        }
+        else  {
+            bit_value = (m >> i-P+shift) & 1;
+        }
+        bits[i] <-- bit_value;
+        bits[i] * (1 - bits[i]) === 0;
+    }
+    component bit_num = Bits2Num(P+1);
+    bit_num.bits <== bits;
+    m_out <== bit_num.out;
+    e_out <-- e + shift - p;
+    //TO DO
+
 }
 
 /*
@@ -307,6 +412,99 @@ template FloatAdd(k, p) {
     signal input m[2];
     signal output e_out;
     signal output m_out;
+    var P = 2*p+1;    
 
-    // TODO
+    component check_well_formedness1 = CheckWellFormedness(k,p);
+    check_well_formedness1.e <== e[1];
+    check_well_formedness1.m <== m[1];
+
+    component check_well_formedness0 = CheckWellFormedness(k,p);
+    check_well_formedness0.e <== e[0];
+    check_well_formedness0.m <== m[0];
+
+    component left_shift1 = LeftShift(252);
+    left_shift1.x <== e[0];
+    left_shift1.shift <== (p+1);
+    left_shift1.skip_checks <== 0;
+
+    component left_shift2 = LeftShift(252);
+    left_shift2.x <== e[1];
+    left_shift2.shift <== (p+1);
+    left_shift2.skip_checks <== 0;
+
+    var mgn_0 = left_shift1.y + m[0];
+    var mgn_1 = left_shift2.y + m[1];
+
+
+    component less_than = LessThan(252);
+    less_than.in <== [mgn_0,mgn_1];
+    signal less <== less_than.out;
+
+    component if_then = IfThenElse();
+    if_then.cond <== less;
+    if_then.L <== e[0];
+    if_then.R <== e[1];
+    signal beta_e <== if_then.out;
+
+    component if_then2 = IfThenElse();
+    if_then2.cond <== less;
+    if_then2.L <== e[1];
+    if_then2.R <== e[0];
+    signal alpha_e <== if_then2.out;
+
+    component if_then3 = IfThenElse();
+    if_then3.cond <== less;
+    if_then3.L <== m[0];
+    if_then3.R <== m[1];
+    signal beta_m <== if_then3.out;
+
+    component if_then4 = IfThenElse();
+    if_then4.cond <== less;
+    if_then4.L <== m[1];
+    if_then4.R <== m[0];
+    signal alpha_m <== if_then4.out;
+
+
+    var diff = alpha_e - beta_e;
+    component less_than2 = LessThan(252);
+    less_than2.in <== [p+1,diff];
+
+    component is_equal = IsEqual();
+    is_equal.in <== [alpha_e,0];
+
+    component or = OR();
+    or.a <== less_than2.out;
+    or.b <== is_equal.out;
+
+    component norm = Normalize(k,p,P);
+    component if_then5 = IfThenElse();
+    if_then5.cond <== or.out;
+    if_then5.L <== alpha_e;
+    if_then5.R <== beta_e;
+    norm.e <== if_then5.out;
+
+    component left_shift = LeftShift(252);
+    left_shift.x <== alpha_m;
+    left_shift.shift <== diff;
+    left_shift.skip_checks <== 0;
+
+    component if_then6 = IfThenElse();
+    if_then6.cond <== or.out;
+    if_then6.L <== alpha_m;
+    if_then6.R <== (left_shift.y + beta_m);
+    norm.m <== if_then6.out;
+
+    norm.skip_checks <== 0;
+    signal norm_e <== norm.e_out;
+    signal norm_m <== norm.m_out;
+
+    component round = RoundAndCheck(k,p,P);
+    round.e <== norm_e;
+    round.m <== norm_m;
+
+    e_out <== round.e_out;
+    m_out <== round.m_out;
+
 }
+
+
